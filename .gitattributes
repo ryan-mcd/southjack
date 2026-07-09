@@ -1,0 +1,16 @@
+# Normalize text line endings across platforms
+* text=auto
+
+# Unix shell scripts must keep LF (Gradle wrapper, etc.)
+*.sh   text eol=lf
+gradlew text eol=lf
+
+# Windows scripts keep CRLF
+*.bat  text eol=crlf
+
+# Treat these as binary
+*.jar      binary
+*.apk      binary
+*.keystore binary
+*.png      binary
+*.jpg      binary
