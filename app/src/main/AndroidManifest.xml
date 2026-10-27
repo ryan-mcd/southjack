@@ -3,13 +3,12 @@
 
     <!-- Enumerate the device's callable PhoneAccounts (diagnostic). -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <!-- Reserved for future self-managed / placeCall paths. -->
-    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
     <!-- Required to fire ACTION_CALL at Google Voice to place the VoIP call. -->
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <!-- Launch Google Voice over the lockscreen when the phone is locked/asleep. -->
     <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Android 11+ package visibility: needed to see / launch Google Voice. -->
     <queries>
@@ -18,9 +17,13 @@
 
     <application
         android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="false"
+        android:icon="@android:drawable/sym_action_call"
         android:label="SouthJack"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.Material.Light">
+        android:theme="@android:style/Theme.Material.Light"
+        android:usesCleartextTraffic="false">
 
         <activity
             android:name=".DiagnosticActivity"

@@ -6,11 +6,11 @@ import android.app.role.RoleManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.os.Build
 import android.os.Bundle
 import android.telecom.PhoneAccount
 import android.telecom.PhoneAccountHandle
 import android.telecom.TelecomManager
-import android.util.Log
 import android.util.TypedValue
 import android.widget.Button
 import android.widget.LinearLayout
@@ -64,7 +64,7 @@ class DiagnosticActivity : Activity() {
         header("2. Google Voice routing")
         val gvInstalled = isInstalled(Settings.GOOGLE_VOICE_PKG)
         val canCall = has(Manifest.permission.CALL_PHONE)
-        val canNotify = has(Manifest.permission.POST_NOTIFICATIONS)
+        val canNotify = Build.VERSION.SDK_INT < 33 || has(Manifest.permission.POST_NOTIFICATIONS)
         body("Google Voice installed: ${check(gvInstalled)}    Call permission: ${check(canCall)}")
         body("Lock-screen calling (notifications): ${check(canNotify)}")
         if (!canNotify) {
@@ -99,8 +99,8 @@ class DiagnosticActivity : Activity() {
         body(
             "In Android Studio Logcat, filter tag:SouthJack. Dial a number from the " +
                 "landline keypad. Expect:\n" +
-                "  • onPlaceCall FIRED  number=tel:…\n" +
-                "  • Launched Google Voice … cancelling the cellular attempt\n\n" +
+                "  • Outgoing call received; destination and account redacted.\n" +
+                "  • Screen unlocked/locked launch path\n\n" +
                 "Then watch the phone: Google Voice should come up and place the call. " +
                 "Paste the log + say what the phone did."
         )
@@ -112,7 +112,9 @@ class DiagnosticActivity : Activity() {
         val need = mutableListOf<String>()
         if (!has(Manifest.permission.READ_PHONE_STATE)) need += Manifest.permission.READ_PHONE_STATE
         if (!has(Manifest.permission.CALL_PHONE)) need += Manifest.permission.CALL_PHONE
-        if (!has(Manifest.permission.POST_NOTIFICATIONS)) need += Manifest.permission.POST_NOTIFICATIONS
+        if (Build.VERSION.SDK_INT >= 33 && !has(Manifest.permission.POST_NOTIFICATIONS)) {
+            need += Manifest.permission.POST_NOTIFICATIONS
+        }
         if (need.isNotEmpty()) requestPermissions(need.toTypedArray(), REQ_PERM)
     }
 
@@ -144,6 +146,10 @@ class DiagnosticActivity : Activity() {
     // --- account listing ----------------------------------------------------------
 
     private fun listPhoneAccounts() {
+        if (!has(Manifest.permission.READ_PHONE_STATE)) {
+            body("Need phone permission to list accounts.")
+            return
+        }
         val handles: List<PhoneAccountHandle> = try {
             tm.callCapablePhoneAccounts
         } catch (e: SecurityException) {

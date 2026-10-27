@@ -1,12 +1,15 @@
 package com.southjack.bridge
 
+import android.Manifest
 import android.app.KeyguardManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.telecom.CallRedirectionService
 import android.telecom.PhoneAccountHandle
@@ -33,7 +36,7 @@ class RedirectionService : CallRedirectionService() {
         initialPhoneAccount: PhoneAccountHandle,
         allowInteractiveResponse: Boolean
     ) {
-        Log.i(TAG, "onPlaceCall FIRED  number=$handle  initialAccount=$initialPhoneAccount")
+        Log.i(TAG, "Outgoing call received; destination and account redacted.")
 
         if (Settings.routeViaGoogleVoice(this)) {
             routeThroughGoogleVoice(handle)
@@ -42,7 +45,7 @@ class RedirectionService : CallRedirectionService() {
 
         val target = Settings.getTarget(this)
         if (target != null && target != initialPhoneAccount) {
-            Log.i(TAG, "Redirecting to account target: $target")
+            Log.i(TAG, "Redirecting to the configured account.")
             redirectCall(handle, target, false)
         } else {
             Log.i(TAG, "No routing configured -> placing call unmodified.")
@@ -61,16 +64,20 @@ class RedirectionService : CallRedirectionService() {
         val locked = km.isKeyguardLocked || !pm.isInteractive
 
         try {
+            if (checkSelfPermission(Manifest.permission.CALL_PHONE) != PackageManager.PERMISSION_GRANTED) {
+                throw SecurityException("Call permission is required")
+            }
             if (locked) {
                 Log.i(TAG, "Screen locked/off -> launching GV via full-screen intent.")
-                launchViaFullScreenIntent(handle, gvIntent)
+                launchViaFullScreenIntent(gvIntent)
             } else {
                 Log.i(TAG, "Screen unlocked -> launching GV directly.")
                 startActivity(gvIntent)
             }
             cancelCall()   // kill the dead cellular attempt (no "No mobile network")
-        } catch (e: Exception) {
-            Log.e(TAG, "Could not hand call to Google Voice ($handle); placing unmodified.", e)
+        } catch (_: Exception) {
+            // Exception messages can include the destination URI; keep logs redacted.
+            Log.e(TAG, "Could not hand call to Google Voice; placing unmodified.")
             placeCallUnmodified()
         }
     }
@@ -81,7 +88,11 @@ class RedirectionService : CallRedirectionService() {
      * the system launches this immediately over the keyguard — which a plain
      * startActivity from the background is not permitted to do.
      */
-    private fun launchViaFullScreenIntent(handle: Uri, gvIntent: Intent) {
+    private fun launchViaFullScreenIntent(gvIntent: Intent) {
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            throw SecurityException("Notification permission is required")
+        }
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "Landline call bridge", NotificationManager.IMPORTANCE_HIGH)
@@ -96,8 +107,9 @@ class RedirectionService : CallRedirectionService() {
         val notif = Notification.Builder(this, CHANNEL_ID)
             .setSmallIcon(android.R.drawable.sym_action_call)
             .setContentTitle("Calling via Google Voice")
-            .setContentText(handle.schemeSpecificPart)
+            .setContentText("Connecting your landline call")
             .setCategory(Notification.CATEGORY_CALL)
+            .setVisibility(Notification.VISIBILITY_PRIVATE)
             .setFullScreenIntent(pi, true)
             .setAutoCancel(true)
             .setTimeoutAfter(15_000)

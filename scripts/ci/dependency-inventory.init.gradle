@@ -1,0 +1,73 @@
+import groovy.json.JsonOutput
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier
+import org.gradle.api.artifacts.result.UnresolvedDependencyResult
+
+// Inventory the dependencies Gradle actually selects, including transitive
+// Android/Kotlin build dependencies. Resolution is strict: an unresolved
+// component fails instead of silently producing an incomplete SBOM.
+gradle.projectsEvaluated {
+    rootProject.tasks.register('securityInventory') {
+        doLast {
+            def packages = [:]
+            def scanned = []
+            def record = { String group, String name, String version, String scope ->
+                def key = "${group}:${name}:${version}"
+                if (!packages.containsKey(key)) {
+                    packages[key] = [
+                        type: 'library', group: group, name: name, version: version,
+                        'bom-ref': key, purl: "pkg:maven/${group}/${name}@${version}",
+                        properties: []
+                    ]
+                }
+                def property = [name: 'southjack:configuration', value: scope]
+                if (!packages[key].properties.contains(property)) {
+                    packages[key].properties.add(property)
+                }
+            }
+
+            rootProject.allprojects.each { project ->
+                def configurations = project.configurations.findAll { configuration ->
+                    configuration.canBeResolved && configuration.name in [
+                        'debugCompileClasspath', 'debugRuntimeClasspath',
+                        'releaseCompileClasspath', 'releaseRuntimeClasspath',
+                        'lintClassPath', 'kotlinCompilerClasspath'
+                    ]
+                }
+                configurations += project.buildscript.configurations.findAll { it.canBeResolved }
+                configurations.unique().each { configuration ->
+                    def scope = "${project.path}:${configuration.name}"
+                    def result = configuration.incoming.resolutionResult
+                    result.allDependencies.each { dependency ->
+                        if (dependency instanceof UnresolvedDependencyResult) {
+                            throw new GradleException(
+                                "Incomplete dependency inventory in ${scope}", dependency.failure)
+                        }
+                    }
+                    result.allComponents.each { component ->
+                        def id = component.id
+                        if (id instanceof ModuleComponentIdentifier) {
+                            record(id.group, id.module, id.version, scope)
+                        }
+                    }
+                    scanned.add(scope)
+                }
+            }
+
+            if (packages.isEmpty()) throw new GradleException('Dependency inventory is empty')
+            record('org.gradle', 'gradle-core', gradle.gradleVersion, 'build-tool')
+            def output = rootProject.layout.buildDirectory.dir('security').get().asFile
+            output.mkdirs()
+            new File(output, 'dependencies.cdx.json').text =
+                JsonOutput.prettyPrint(JsonOutput.toJson([
+                    bomFormat: 'CycloneDX', specVersion: '1.5', version: 1,
+                    components: packages.values().sort { "${it.group}:${it.name}:${it.version}" }
+                ])) + '\n'
+            new File(output, 'inventory-coverage.json').text =
+                JsonOutput.prettyPrint(JsonOutput.toJson([
+                    configurations: scanned.sort(), components: packages.size(),
+                    excluded: ['JDK internals', 'Android SDK binaries', 'shaded libraries', 'device firmware']
+                ])) + '\n'
+            println "Security inventory: ${packages.size()} components from ${scanned.size()} configurations"
+        }
+    }
+}
